@@ -23,7 +23,8 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="og.png">
 <style>
-  html,body{margin:0;height:100%;background:#1b1f2a;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;font-family:"Hiragino Maru Gothic ProN","Rounded Mplus 1c",system-ui,sans-serif;color:#fff}
+  *{touch-action:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  html,body{position:fixed;inset:0;overscroll-behavior:none;-webkit-text-size-adjust:100%;margin:0;height:100%;background:#1b1f2a;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none;font-family:"Hiragino Maru Gothic ProN","Rounded Mplus 1c",system-ui,sans-serif;color:#fff}
   canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
   #pad{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:flex-end;padding:14px calc(18px + env(safe-area-inset-right)) calc(18px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));pointer-events:none}
   .grp{display:flex;gap:14px}
@@ -93,15 +94,41 @@ const store={get(k,d){try{const v=localStorage.getItem('onigiri_'+k);return v==n
 
 // ---------- input ----------
 const inp={l:false,r:false,j:false};let jumpPressed=false;
-function bind(id,k){const el=document.getElementById(id);
-  const on=e=>{e.preventDefault();if(k==='j'&&!inp.j)jumpPressed=true;inp[k]=true;el.classList.add('on');};
-  const off=e=>{e.preventDefault();inp[k]=false;el.classList.remove('on');};
-  el.addEventListener('pointerdown',on);['pointerup','pointercancel','pointerleave'].forEach(t=>el.addEventListener(t,off));}
-bind('bl','l');bind('br','r');bind('bj','j');
+// --- touch controls: per-pointer tracking (multi-touch + slide between buttons) ---
+const btns={l:document.getElementById('bl'),r:document.getElementById('br'),j:document.getElementById('bj')};
+const ptrs=new Map(); // pointerId -> key
+function keyAt(x,y){const el=document.elementFromPoint(x,y);if(!el)return null;for(const k in btns)if(btns[k]===el||btns[k].contains(el))return k;return null;}
+function syncPad(){const held={l:false,r:false,j:false};for(const k of ptrs.values())if(k)held[k]=true;
+  for(const k in btns){if(k==='j'&&held.j&&!padJ)jumpPressed=true;btns[k].classList.toggle('on',held[k]);}
+  padJ=held.j;padState=held;}
+let padJ=false,padState={l:false,r:false,j:false};
+for(const k in btns){const el=btns[k];
+  el.addEventListener('pointerdown',e=>{e.preventDefault();try{el.releasePointerCapture(e.pointerId);}catch(_){}ptrs.set(e.pointerId,k);syncPad();});}
+addEventListener('pointermove',e=>{if(!ptrs.has(e.pointerId))return;const k=keyAt(e.clientX,e.clientY);if(k!==ptrs.get(e.pointerId)){ptrs.set(e.pointerId,k);syncPad();}},{passive:true});
+['pointerup','pointercancel'].forEach(t=>addEventListener(t,e=>{if(ptrs.delete(e.pointerId))syncPad();}));
+const kb={l:false,r:false,j:false};
+Object.defineProperties(inp,{l:{get:()=>padState.l||kb.l},r:{get:()=>padState.r||kb.r},j:{get:()=>padState.j||kb.j}});
+function releaseAll(){ptrs.clear();syncPad();kb.l=kb.r=kb.j=false;}
+addEventListener('blur',releaseAll);document.addEventListener('visibilitychange',()=>{if(document.hidden)releaseAll();});
+
+// --- iOS Safari / LINE: block double-tap & pinch zoom ---
+const nozoom=e=>{e.preventDefault();};
+document.addEventListener('touchstart',e=>{if(e.touches.length>1||e.target.closest('#pad,canvas'))e.preventDefault();},{passive:false});
+document.addEventListener('touchmove',nozoom,{passive:false});
+document.addEventListener('touchend',nozoom,{passive:false}); // kills double-tap zoom (taps handled via pointer events)
+['gesturestart','gesturechange','gestureend','dblclick'].forEach(t=>document.addEventListener(t,nozoom,{passive:false}));
+// if a browser zoomed anyway, snap back to 1x
+const vpMeta=document.querySelector('meta[name=viewport]'),vpBase=vpMeta.content;
+function unzoom(){if(window.visualViewport&&visualViewport.scale>1.01){vpMeta.content=vpBase.replace('maximum-scale=1','maximum-scale=1.01');requestAnimationFrame(()=>{vpMeta.content=vpBase;scrollTo(0,0);});}}
+if(window.visualViewport){visualViewport.addEventListener('resize',unzoom);visualViewport.addEventListener('scroll',()=>{if(visualViewport.scale>1.01)unzoom();});}
+// tap helper for UI buttons (touchend is prevented, so no synthetic click on touch devices)
+function tap(el,fn){let down=false;el.addEventListener('pointerdown',e=>{down=true;el.style.transform='translateY(3px)';});
+  el.addEventListener('pointerleave',()=>{down=false;el.style.transform='';});
+  el.addEventListener('pointerup',e=>{el.style.transform='';if(down){down=false;e.preventDefault();fn();}});}
 const keyMap={ArrowLeft:'l',KeyA:'l',ArrowRight:'r',KeyD:'r',Space:'j',ArrowUp:'j',KeyW:'j'};
-addEventListener('keydown',e=>{const k=keyMap[e.code];if(k){e.preventDefault();if(k==='j'&&!inp.j)jumpPressed=true;inp[k]=true;}
+addEventListener('keydown',e=>{const k=keyMap[e.code];if(k){e.preventDefault();if(k==='j'&&!inp.j)jumpPressed=true;kb[k]=true;}
   if(e.code==='Escape')showMenu();});
-addEventListener('keyup',e=>{const k=keyMap[e.code];if(k)inp[k]=false;});
+addEventListener('keyup',e=>{const k=keyMap[e.code];if(k)kb[k]=false;});
 
 // ---------- audio ----------
 let ac=null;
@@ -248,14 +275,14 @@ function player(dt){
 const $=id=>document.getElementById(id);
 function fmt(t){const m=Math.floor(t/60),s=(t%60).toFixed(1);return m?`${m}:${s.padStart(4,'0')}`:s;}
 function showMenu(){
-  state='menu';$('clear').classList.add('hide');$('menu').classList.remove('hide');$('pad').classList.add('hide');$('menuBtn').classList.add('hide');
+  releaseAll();state='menu';$('clear').classList.add('hide');$('menu').classList.remove('hide');$('pad').classList.add('hide');$('menuBtn').classList.add('hide');
   const un=store.get('unlocked',1),box=$('stages');box.innerHTML='';
   STAGES.forEach((s,i)=>{const b=document.createElement('button');const best=store.get('best'+i,null);
     const lock=i>=un;b.className='st'+(lock?' lock':(i===un-1?' go':''));
     b.innerHTML=`${lock?'🔒 ':''}STAGE ${i+1}<small>${s.name}${best?`<br>ベスト ${fmt(best.t)}・死亡${best.d}回`:''}</small>`;
-    if(!lock)b.onclick=()=>start(i);box.appendChild(b);});
+    if(!lock)tap(b,()=>start(i));box.appendChild(b);});
 }
-function start(i){$('menu').classList.add('hide');$('clear').classList.add('hide');$('pad').classList.remove('hide');$('menuBtn').classList.remove('hide');snd(520,.12);loadStage(i);}
+function start(i){releaseAll();$('menu').classList.add('hide');$('clear').classList.add('hide');$('pad').classList.remove('hide');$('menuBtn').classList.remove('hide');snd(520,.12);loadStage(i);}
 function clearStage(){
   state='clear';snd(660,.15);setTimeout(()=>snd(880,.15),150);setTimeout(()=>snd(1320,.4),300);
   const k='best'+cur,best=store.get(k,null),rec={t:runTime,d:deaths},nb=!best||rec.t<best.t;if(nb)store.set(k,rec);
@@ -267,7 +294,7 @@ function clearStage(){
   $('clNext').classList.toggle('hide',last);
   setTimeout(()=>{$('clear').classList.remove('hide');$('pad').classList.add('hide');},600);
 }
-$('clNext').onclick=()=>start(cur+1);$('clRetry').onclick=()=>start(cur);$('clMenu').onclick=showMenu;$('menuBtn').onclick=showMenu;
+tap($('clNext'),()=>start(cur+1));tap($('clRetry'),()=>start(cur));tap($('clMenu'),showMenu);tap($('menuBtn'),showMenu);
 
 // ---------- draw ----------
 function rr(x,y,w,h,r){ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h);}
@@ -414,7 +441,7 @@ function loop(now){const d=Math.min(.05,(now-last)/1000);last=now;acc+=d;
 // menu background: show stage 1 scenery
 L=JSON.parse(JSON.stringify(STAGES[0].d));TH=STAGES[0].theme;loadStage(0);showMenu();
 requestAnimationFrame(loop);
-window.__g={P,get L(){return L},start,get state(){return state},get deaths(){return deaths},stages:STAGES};
+window.__g={inp,P,get L(){return L},start,get state(){return state},get deaths(){return deaths},stages:STAGES};
 })();
 </script>
 </body>
