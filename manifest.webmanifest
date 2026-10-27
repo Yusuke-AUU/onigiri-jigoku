@@ -1,0 +1,14 @@
+{
+  "name": "おにぎり地獄",
+  "short_name": "おにぎり地獄",
+  "description": "おにぎり頭の少年を操作する鬼畜ゲーム",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#1b1f2a",
+  "theme_color": "#5fd8e8",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
